@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react"
 import { motion } from "framer-motion"
-import { Search, RotateCcw, Download, ChevronLeft, ChevronRight } from "lucide-react"
-import { format, parseISO, startOfMonth, endOfMonth, subMonths } from "date-fns"
+import { Search, RotateCcw, Download, ChevronLeft, ChevronRight, X, FileText, DollarSign, Star } from "lucide-react"
+import { format, parseISO, subMonths } from "date-fns"
 import { useStore } from "@/store"
 import StarRating from "@/components/StarRating"
 import StatusBadge from "@/components/StatusBadge"
@@ -37,7 +37,6 @@ const PAGE_SIZE = 10
 
 export default function AdminReports() {
   const getFilteredRecords = useStore((s) => s.getFilteredRecords)
-  const addNotification = useStore((s) => s.addNotification)
   const bookings = useStore((s) => s.bookings)
   const reviews = useStore((s) => s.reviews)
   const incidents = useStore((s) => s.incidents)
@@ -51,6 +50,7 @@ export default function AdminReports() {
   const [incidentTypeFilter, setIncidentTypeFilter] = useState<IncidentType | "">("")
   const [activeTab, setActiveTab] = useState<TabKey>("bookings")
   const [page, setPage] = useState(1)
+  const [showExportModal, setShowExportModal] = useState(false)
 
   const getPet = (petId: string) => pets.find((p) => p.id === petId)
   const getOwner = (ownerId: string) => users.find((u) => u.id === ownerId)
@@ -83,6 +83,16 @@ export default function AdminReports() {
       return true
     })
   }, [incidents, startDate, endDate, incidentTypeFilter])
+
+  const summaryStats = useMemo(() => {
+    const completedBookings = filteredBookings.filter((b) => b.status === "checked_out" && b.bill)
+    const totalIncome = completedBookings.reduce((sum, b) => sum + (b.bill?.total ?? 0), 0)
+    const relevantReviews = filteredReviews.length > 0 ? filteredReviews : reviews
+    const avgRating = relevantReviews.length > 0
+      ? Math.round((relevantReviews.reduce((s, r) => s + r.rating, 0) / relevantReviews.length) * 10) / 10
+      : 0
+    return { totalIncome, avgRating, completedCount: completedBookings.length, reviewCount: filteredReviews.length }
+  }, [filteredBookings, filteredReviews, reviews])
 
   const paginatedBookings = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE
@@ -122,13 +132,39 @@ export default function AdminReports() {
   }
 
   const handleExport = () => {
-    addNotification("报表已生成", "success")
+    setShowExportModal(true)
   }
 
   const handleTabChange = (tab: TabKey) => {
     setActiveTab(tab)
     setPage(1)
   }
+
+  const exportMonthlySummary = useMemo(() => {
+    const completedBookings = filteredBookings.filter((b) => b.status === "checked_out" && b.bill)
+    const orderDetails = completedBookings.map((b) => {
+      const pet = getPet(b.petId)
+      const owner = getOwner(b.ownerId)
+      const cage = getCage(b.cageId)
+      return {
+        id: b.id.slice(-4).toUpperCase(),
+        petName: pet?.name ?? "未知",
+        ownerName: owner?.name ?? "未知",
+        cageName: cage?.name ?? "-",
+        startDate: b.startDate,
+        endDate: b.actualEndDate ?? b.endDate,
+        days: b.bill?.days ?? 0,
+        total: b.bill?.total ?? 0,
+      }
+    })
+    const reviewSummary = filteredReviews.map((r) => {
+      const owner = getOwner(r.ownerId)
+      const booking = bookings.find((b) => b.id === r.bookingId)
+      const pet = booking ? getPet(booking.petId) : undefined
+      return { rating: r.rating, content: r.content, ownerName: owner?.name ?? "未知", petName: pet?.name ?? "-", date: r.createdAt }
+    })
+    return { orderDetails, reviewSummary, totalIncome: summaryStats.totalIncome }
+  }, [filteredBookings, filteredReviews, bookings, pets, users, cages, summaryStats.totalIncome])
 
   return (
     <div className="min-h-screen bg-cream-100 flex">
@@ -208,6 +244,36 @@ export default function AdminReports() {
       </div>
 
       <div className="flex-1 p-6">
+        <div className="grid grid-cols-3 gap-4 mb-6">
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-white rounded-2xl shadow-card p-5 flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-coral-400/10 flex items-center justify-center">
+              <DollarSign className="w-6 h-6 text-coral-400" />
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">筛选收入总额</p>
+              <p className="text-2xl font-extrabold text-coral-400">¥{summaryStats.totalIncome.toLocaleString()}</p>
+            </div>
+          </motion.div>
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-white rounded-2xl shadow-card p-5 flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/10 flex items-center justify-center">
+              <Star className="w-6 h-6 text-amber-500" />
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">筛选平均评分</p>
+              <p className="text-2xl font-extrabold text-amber-500">{summaryStats.avgRating}</p>
+            </div>
+          </motion.div>
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="bg-white rounded-2xl shadow-card p-5 flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-mint-400/10 flex items-center justify-center">
+              <FileText className="w-6 h-6 text-mint-500" />
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">已完成订单</p>
+              <p className="text-2xl font-extrabold text-mint-500">{summaryStats.completedCount}</p>
+            </div>
+          </motion.div>
+        </div>
+
         <div className="flex gap-2 mb-5">
           {([
             { key: "bookings" as TabKey, label: "预约记录" },
@@ -262,7 +328,9 @@ export default function AdminReports() {
                         {format(parseISO(b.startDate), "MM/dd")} - {format(parseISO(b.endDate), "MM/dd")}
                       </td>
                       <td className="py-3 px-4"><StatusBadge status={b.status} /></td>
-                      <td className="py-3 px-4 text-right font-semibold text-gray-800">¥{b.dailyRate}/天</td>
+                      <td className="py-3 px-4 text-right font-semibold text-gray-800">
+                        {b.bill ? `¥${b.bill.total}` : `¥${b.dailyRate}/天`}
+                      </td>
                     </tr>
                   )
                 })}
@@ -402,6 +470,114 @@ export default function AdminReports() {
           </div>
         </div>
       </div>
+
+      {showExportModal && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+          onClick={() => setShowExportModal(false)}
+        >
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.9, opacity: 0 }}
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-3xl shadow-card-hover p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto"
+          >
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-lg font-display font-bold text-gray-800">报表导出预览</h2>
+              <button onClick={() => setShowExportModal(false)} className="text-gray-400 hover:text-coral-400">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              <div>
+                <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
+                  <DollarSign className="w-4 h-4 text-coral-400" />
+                  收入合计
+                </h3>
+                <div className="bg-coral-50 rounded-2xl p-4">
+                  <p className="text-3xl font-extrabold text-coral-400">¥{exportMonthlySummary.totalIncome.toLocaleString()}</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {startDate} ~ {endDate} 期间 {exportMonthlySummary.orderDetails.length} 笔已完成订单
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-mint-500" />
+                  订单明细
+                </h3>
+                {exportMonthlySummary.orderDetails.length === 0 ? (
+                  <p className="text-sm text-gray-400">暂无已完成订单</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gray-50 text-gray-500">
+                          <th className="text-left py-2 px-3 font-semibold">编号</th>
+                          <th className="text-left py-2 px-3 font-semibold">宠物</th>
+                          <th className="text-left py-2 px-3 font-semibold">主人</th>
+                          <th className="text-left py-2 px-3 font-semibold">笼位</th>
+                          <th className="text-left py-2 px-3 font-semibold">入住-离店</th>
+                          <th className="text-left py-2 px-3 font-semibold">天数</th>
+                          <th className="text-right py-2 px-3 font-semibold">金额</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {exportMonthlySummary.orderDetails.map((d) => (
+                          <tr key={d.id} className="border-t border-gray-100">
+                            <td className="py-2 px-3 text-gray-600">{d.id}</td>
+                            <td className="py-2 px-3 font-semibold text-gray-800">{d.petName}</td>
+                            <td className="py-2 px-3 text-gray-600">{d.ownerName}</td>
+                            <td className="py-2 px-3 text-gray-600">{d.cageName}</td>
+                            <td className="py-2 px-3 text-gray-600">{d.startDate} ~ {d.endDate}</td>
+                            <td className="py-2 px-3 text-gray-600">{d.days}天</td>
+                            <td className="py-2 px-3 text-right font-semibold text-coral-400">¥{d.total}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
+                  <Star className="w-4 h-4 text-amber-500" />
+                  评价汇总（{exportMonthlySummary.reviewSummary.length}条）
+                </h3>
+                {exportMonthlySummary.reviewSummary.length === 0 ? (
+                  <p className="text-sm text-gray-400">暂无评价</p>
+                ) : (
+                  <div className="space-y-2">
+                    {exportMonthlySummary.reviewSummary.map((r, idx) => (
+                      <div key={idx} className="bg-cream-100 rounded-xl p-3 flex items-start gap-3">
+                        <StarRating rating={r.rating} size="sm" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-gray-700">{r.content}</p>
+                          <p className="text-xs text-gray-400 mt-1">{r.ownerName} · {r.petName} · {r.date}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <button
+              onClick={() => setShowExportModal(false)}
+              className="w-full mt-6 py-3 bg-coral-400 text-white font-bold rounded-xl hover:bg-coral-500 transition-colors"
+            >
+              关闭
+            </button>
+          </motion.div>
+        </motion.div>
+      )}
     </div>
   )
 }

@@ -30,7 +30,7 @@ export default function Login() {
   function handleLogin() {
     setError("")
     if (selectedRole === "admin") {
-      const user = login(phone, password)
+      const user = login(username, password)
       if (user && user.role === "admin") {
         navigate("/admin")
       } else {
@@ -129,7 +129,7 @@ export default function Login() {
                     type="text"
                     placeholder="管理员账号"
                     value={username}
-                    onChange={(e) => setPhone(e.target.value)}
+                    onChange={(e) => setUsername(e.target.value)}
                     className="w-full pl-10 pr-4 py-3 rounded-2xl bg-white/70 border border-cream-300 focus:border-coral-400 focus:ring-2 focus:ring-coral-100 outline-none text-sm transition"
                   />
                 </div>

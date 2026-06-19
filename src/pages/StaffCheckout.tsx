@@ -54,7 +54,7 @@ export default function StaffCheckout() {
 
   const handleCheckout = () => {
     setBillData({ days, dailyRate: booking.dailyRate, subtotal, extrasTotal, total })
-    checkOutBooking(booking.id)
+    checkOutBooking(booking.id, extras)
     setShowModal(true)
   }
 

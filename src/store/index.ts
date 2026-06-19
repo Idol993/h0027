@@ -10,6 +10,7 @@ import type {
   Incident,
   Review,
   Bill,
+  BillExtra,
   DashboardStats,
   ReportFilters,
   CheckinRecord,
@@ -61,7 +62,7 @@ interface StoreActions {
   viewIncident(incidentId: string): void
   remindIncident(incidentId: string): void
   escalateIncident(incidentId: string): void
-  checkOutBooking(bookingId: string): void
+  checkOutBooking(bookingId: string, extras?: BillExtra[]): void
   submitReview(bookingId: string, rating: number, content: string): boolean
   getDashboardStats(): DashboardStats
   getFilteredRecords(filters: ReportFilters): Booking[]
@@ -141,7 +142,7 @@ export const useStore = create<Store>()(
         const booking: Booking = {
           id: genId(),
           ...data,
-          status: "pending",
+          status: "confirmed",
           createdAt: new Date().toISOString().split("T")[0],
         }
         set((state) => ({ bookings: [...state.bookings, booking] }))
@@ -232,18 +233,21 @@ export const useStore = create<Store>()(
         get().addNotification("事件已升级，请联系管理员处理", "error")
       },
 
-      checkOutBooking(bookingId) {
+      checkOutBooking(bookingId, extras?) {
         const booking = get().bookings.find((b) => b.id === bookingId)
         if (!booking) return
         const today = new Date().toISOString().split("T")[0]
-        const days = differenceInCalendarDays(parseISO(today), parseISO(booking.startDate))
+        const days = Math.max(1, differenceInCalendarDays(parseISO(today), parseISO(booking.startDate)))
+        const subtotal = days * booking.dailyRate
+        const billExtras = extras ?? []
+        const extrasTotal = billExtras.reduce((sum, e) => sum + e.amount, 0)
         const bill: Bill = {
           bookingId,
           days,
           dailyRate: booking.dailyRate,
-          subtotal: days * booking.dailyRate,
-          extras: [],
-          total: days * booking.dailyRate,
+          subtotal,
+          extras: billExtras,
+          total: subtotal + extrasTotal,
           generatedAt: new Date().toISOString(),
         }
         set((state) => ({
