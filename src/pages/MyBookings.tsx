@@ -8,10 +8,10 @@ import type { BookingStatus } from "@/types"
 
 const tabs: { key: BookingStatus | "all"; label: string }[] = [
   { key: "all", label: "全部" },
-  { key: "pending", label: "待确认" },
   { key: "confirmed", label: "已确认" },
   { key: "checked_in", label: "在住中" },
   { key: "checked_out", label: "已离店" },
+  { key: "cancelled", label: "已取消" },
 ]
 
 const statusBorderColor: Record<BookingStatus, string> = {

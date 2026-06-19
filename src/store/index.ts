@@ -15,6 +15,7 @@ import type {
   ReportFilters,
   CheckinRecord,
   IncidentType,
+  SmsRecord,
 } from "@/types"
 import {
   mockUsers,
@@ -56,6 +57,7 @@ interface StoreActions {
   createBooking(data: { ownerId: string; petId: string; cageId: string; startDate: string; endDate: string; dailyRate: number }): Booking
   getBookingsByOwner(ownerId: string): Booking[]
   getBookingById(id: string): Booking | undefined
+  cancelBooking(bookingId: string): boolean
   checkInBooking(bookingId: string, record: Omit<CheckinRecord, "bookingId">): void
   addCareDiary(bookingId: string, content: string, images: string[], createdBy: string): CareDiary | null
   addIncident(bookingId: string, type: IncidentType, description: string, photos: string[], createdBy: string): Incident
@@ -139,11 +141,40 @@ export const useStore = create<Store>()(
       },
 
       createBooking(data) {
+        const { users, pets, cages } = get()
+        const owner = users.find((u) => u.id === data.ownerId)
+        const pet = pets.find((p) => p.id === data.petId)
+        const cage = cages.find((c) => c.id === data.cageId)
+        const days = Math.max(1, differenceInCalendarDays(parseISO(data.endDate), parseISO(data.startDate)))
+        const total = days * data.dailyRate
+
+        const smsRecords: SmsRecord[] = []
+        if (owner) {
+          smsRecords.push({
+            id: genId(),
+            recipient: owner.name,
+            recipientPhone: owner.phone,
+            content: `【毛孩寄养】${owner.name}您好！您的宠物${pet?.name ?? ""}已成功预约${data.startDate}至${data.endDate}的寄养服务，笼位：${cage?.name ?? ""}，预计费用：¥${total}。请按时送宠入住。`,
+            sentAt: new Date().toISOString(),
+          })
+        }
+        const caretakers = users.filter((u) => u.role === "caretaker")
+        caretakers.forEach((ct) => {
+          smsRecords.push({
+            id: genId(),
+            recipient: ct.name,
+            recipientPhone: ct.phone,
+            content: `【毛孩寄养】养护员您好！新预约已确认：${pet?.name ?? ""}（主人：${owner?.name ?? ""}），${data.startDate}入住，${data.endDate}离店，笼位：${cage?.name ?? ""}。请注意接待。`,
+            sentAt: new Date().toISOString(),
+          })
+        })
+
         const booking: Booking = {
           id: genId(),
           ...data,
           status: "confirmed",
           createdAt: new Date().toISOString().split("T")[0],
+          smsRecords,
         }
         set((state) => ({ bookings: [...state.bookings, booking] }))
         get().addNotification("预约创建成功", "success")
@@ -158,6 +189,21 @@ export const useStore = create<Store>()(
 
       getBookingById(id) {
         return get().bookings.find((b) => b.id === id)
+      },
+
+      cancelBooking(bookingId) {
+        const booking = get().bookings.find((b) => b.id === bookingId)
+        if (!booking) return false
+        if (booking.status !== "confirmed" && booking.status !== "pending") return false
+        set((state) => ({
+          bookings: state.bookings.map((b) =>
+            b.id === bookingId
+              ? { ...b, status: "cancelled" as const, cancelledAt: new Date().toISOString() }
+              : b
+          ),
+        }))
+        get().addNotification("预约已取消", "success")
+        return true
       },
 
       checkInBooking(bookingId, record) {

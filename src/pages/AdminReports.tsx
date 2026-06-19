@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react"
 import { motion } from "framer-motion"
-import { Search, RotateCcw, Download, ChevronLeft, ChevronRight, X, FileText, DollarSign, Star } from "lucide-react"
+import { Search, RotateCcw, Download, ChevronLeft, ChevronRight, X, FileText, DollarSign, Star, AlertTriangle } from "lucide-react"
 import { format, parseISO, subMonths } from "date-fns"
 import { useStore } from "@/store"
 import StarRating from "@/components/StarRating"
@@ -87,12 +87,11 @@ export default function AdminReports() {
   const summaryStats = useMemo(() => {
     const completedBookings = filteredBookings.filter((b) => b.status === "checked_out" && b.bill)
     const totalIncome = completedBookings.reduce((sum, b) => sum + (b.bill?.total ?? 0), 0)
-    const relevantReviews = filteredReviews.length > 0 ? filteredReviews : reviews
-    const avgRating = relevantReviews.length > 0
-      ? Math.round((relevantReviews.reduce((s, r) => s + r.rating, 0) / relevantReviews.length) * 10) / 10
+    const avgRating = filteredReviews.length > 0
+      ? Math.round((filteredReviews.reduce((s, r) => s + r.rating, 0) / filteredReviews.length) * 10) / 10
       : 0
     return { totalIncome, avgRating, completedCount: completedBookings.length, reviewCount: filteredReviews.length }
-  }, [filteredBookings, filteredReviews, reviews])
+  }, [filteredBookings, filteredReviews])
 
   const paginatedBookings = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE
@@ -163,8 +162,151 @@ export default function AdminReports() {
       const pet = booking ? getPet(booking.petId) : undefined
       return { rating: r.rating, content: r.content, ownerName: owner?.name ?? "未知", petName: pet?.name ?? "-", date: r.createdAt }
     })
-    return { orderDetails, reviewSummary, totalIncome: summaryStats.totalIncome }
-  }, [filteredBookings, filteredReviews, bookings, pets, users, cages, summaryStats.totalIncome])
+    const incidentSummary = filteredIncidents.map((i) => {
+      const booking = bookings.find((b) => b.id === i.bookingId)
+      const pet = booking ? getPet(booking.petId) : undefined
+      const owner = booking ? getOwner(booking.ownerId) : undefined
+      return {
+        type: incidentTypeLabel[i.type],
+        description: i.description,
+        petName: pet?.name ?? "-",
+        ownerName: owner?.name ?? "-",
+        status: i.notifyStatus === "sent" ? "已通知" : i.notifyStatus === "viewed" ? "已查看" : i.notifyStatus === "reminded" ? "已提醒" : "已升级",
+        time: i.createdAt,
+      }
+    })
+    const incidentStats: Record<string, number> = {}
+    filteredIncidents.forEach((i) => {
+      const label = incidentTypeLabel[i.type]
+      incidentStats[label] = (incidentStats[label] || 0) + 1
+    })
+    return {
+      orderDetails,
+      reviewSummary,
+      incidentSummary,
+      incidentStats,
+      totalIncome: summaryStats.totalIncome,
+      avgRating: summaryStats.avgRating,
+    }
+  }, [filteredBookings, filteredReviews, filteredIncidents, bookings, pets, users, cages, summaryStats.totalIncome, summaryStats.avgRating])
+
+  function generateCSV(): string {
+    const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`
+    const lines: string[] = []
+    lines.push("毛孩寄养月度报表")
+    lines.push(`筛选日期,${esc(startDate)} ~ ${esc(endDate)}`)
+    lines.push(`生成时间,${esc(format(new Date(), "yyyy-MM-dd HH:mm:ss"))}`)
+    lines.push("")
+    lines.push("=== 收入合计 ===")
+    lines.push(`收入总额,${esc(exportMonthlySummary.totalIncome)}`)
+    lines.push(`已完成订单数,${esc(exportMonthlySummary.orderDetails.length)}`)
+    lines.push(`平均评分,${esc(exportMonthlySummary.avgRating)}`)
+    lines.push("")
+    lines.push("=== 订单明细 ===")
+    lines.push(["编号", "宠物", "主人", "笼位", "入住日期", "离店日期", "天数", "金额(元)"].map(esc).join(","))
+    exportMonthlySummary.orderDetails.forEach((d) => {
+      lines.push([d.id, d.petName, d.ownerName, d.cageName, d.startDate, d.endDate, d.days, d.total].map(esc).join(","))
+    })
+    lines.push("")
+    lines.push("=== 评价汇总 ===")
+    lines.push(["星级", "内容", "主人", "宠物", "日期"].map(esc).join(","))
+    exportMonthlySummary.reviewSummary.forEach((r) => {
+      lines.push([r.rating, r.content, r.ownerName, r.petName, r.date].map(esc).join(","))
+    })
+    lines.push("")
+    lines.push("=== 异常统计 ===")
+    lines.push(["类型", "数量"].map(esc).join(","))
+    Object.entries(exportMonthlySummary.incidentStats).forEach(([k, v]) => {
+      lines.push([k, v].map(esc).join(","))
+    })
+    if (exportMonthlySummary.incidentSummary.length > 0) {
+      lines.push("")
+      lines.push("=== 异常明细 ===")
+      lines.push(["类型", "描述", "宠物", "主人", "状态", "时间"].map(esc).join(","))
+      exportMonthlySummary.incidentSummary.forEach((i) => {
+        lines.push([i.type, i.description, i.petName, i.ownerName, i.status, i.time].map(esc).join(","))
+      })
+    }
+    return "\uFEFF" + lines.join("\n")
+  }
+
+  function generateTXT(): string {
+    const pad = (s: string | number, w = 12) => String(s).padEnd(w, " ")
+    const lines: string[] = []
+    lines.push("========================================")
+    lines.push("        毛孩寄养 - 月度运营报表         ")
+    lines.push("========================================")
+    lines.push(`筛选日期：${startDate} ~ ${endDate}`)
+    lines.push(`生成时间：${format(new Date(), "yyyy-MM-dd HH:mm:ss")}`)
+    lines.push("")
+    lines.push("【收入合计】")
+    lines.push(`  收入总额：¥${exportMonthlySummary.totalIncome.toLocaleString()}`)
+    lines.push(`  已完成订单：${exportMonthlySummary.orderDetails.length} 笔`)
+    lines.push(`  平均评分：${exportMonthlySummary.avgRating} 星`)
+    lines.push("")
+    lines.push("【订单明细】")
+    if (exportMonthlySummary.orderDetails.length === 0) {
+      lines.push("  （暂无数据）")
+    } else {
+      lines.push(`  ${pad("编号", 6)}${pad("宠物", 8)}${pad("主人", 8)}${pad("笼位", 8)}${pad("入住", 12)}${pad("离店", 12)}${pad("天数", 6)}金额`)
+      exportMonthlySummary.orderDetails.forEach((d) => {
+        lines.push(`  ${pad(d.id, 6)}${pad(d.petName, 8)}${pad(d.ownerName, 8)}${pad(d.cageName, 8)}${pad(d.startDate, 12)}${pad(d.endDate, 12)}${pad(d.days + "天", 6)}¥${d.total}`)
+      })
+    }
+    lines.push("")
+    lines.push("【评价汇总】")
+    if (exportMonthlySummary.reviewSummary.length === 0) {
+      lines.push("  （暂无数据）")
+    } else {
+      exportMonthlySummary.reviewSummary.forEach((r, i) => {
+        lines.push(`  ${i + 1}. [${"★".repeat(r.rating)}${"☆".repeat(5 - r.rating)}] ${r.ownerName}（${r.petName}） - ${r.date}`)
+        lines.push(`     ${r.content}`)
+      })
+    }
+    lines.push("")
+    lines.push("【异常统计】")
+    if (Object.keys(exportMonthlySummary.incidentStats).length === 0) {
+      lines.push("  （暂无异常）")
+    } else {
+      Object.entries(exportMonthlySummary.incidentStats).forEach(([k, v]) => {
+        lines.push(`  ${k}：${v} 起`)
+      })
+      if (exportMonthlySummary.incidentSummary.length > 0) {
+        lines.push("")
+        lines.push("  异常明细：")
+        exportMonthlySummary.incidentSummary.forEach((i, idx) => {
+          lines.push(`    ${idx + 1}. [${i.type}] ${i.petName}（${i.ownerName}）- ${i.status}`)
+          lines.push(`       ${i.description}`)
+          lines.push(`       ${i.time}`)
+        })
+      }
+    }
+    lines.push("")
+    lines.push("========================================")
+    return lines.join("\n")
+  }
+
+  function triggerDownload(filename: string, content: string, mime: string) {
+    const blob = new Blob([content], { type: mime })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  function handleDownloadCSV() {
+    const dateStr = format(new Date(), "yyyyMMdd")
+    triggerDownload(`monthly-report-${dateStr}.csv`, generateCSV(), "text/csv;charset=utf-8")
+  }
+
+  function handleDownloadTXT() {
+    const dateStr = format(new Date(), "yyyyMMdd")
+    triggerDownload(`monthly-report-${dateStr}.txt`, generateTXT(), "text/plain;charset=utf-8")
+  }
 
   return (
     <div className="min-h-screen bg-cream-100 flex">
@@ -567,11 +709,47 @@ export default function AdminReports() {
                   </div>
                 )}
               </div>
+
+              <div>
+                <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-500" />
+                  异常统计
+                </h3>
+                {Object.keys(exportMonthlySummary.incidentStats).length === 0 ? (
+                  <p className="text-sm text-gray-400">暂无异常</p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-3">
+                    {Object.entries(exportMonthlySummary.incidentStats).map(([k, v]) => (
+                      <div key={k} className="bg-amber-50 rounded-xl p-3 flex items-center justify-between">
+                        <span className="text-sm font-semibold text-amber-700">{k}</span>
+                        <span className="text-xl font-extrabold text-amber-600">{v}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mt-6">
+              <button
+                onClick={handleDownloadCSV}
+                className="py-3 bg-mint-400 text-white font-bold rounded-xl hover:bg-mint-500 transition-colors flex items-center justify-center gap-2"
+              >
+                <Download className="w-4 h-4" />
+                下载 CSV
+              </button>
+              <button
+                onClick={handleDownloadTXT}
+                className="py-3 bg-coral-400 text-white font-bold rounded-xl hover:bg-coral-500 transition-colors flex items-center justify-center gap-2"
+              >
+                <Download className="w-4 h-4" />
+                下载 TXT
+              </button>
             </div>
 
             <button
               onClick={() => setShowExportModal(false)}
-              className="w-full mt-6 py-3 bg-coral-400 text-white font-bold rounded-xl hover:bg-coral-500 transition-colors"
+              className="w-full mt-3 py-3 bg-gray-100 text-gray-600 font-bold rounded-xl hover:bg-gray-200 transition-colors"
             >
               关闭
             </button>

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { Calendar, PawPrint, Home, AlertTriangle, FileText, X, Eye } from "lucide-react"
-import { motion } from "framer-motion"
+import { Calendar, PawPrint, Home, AlertTriangle, FileText, X, Eye, MessageSquare, Info } from "lucide-react"
+import { motion, AnimatePresence } from "framer-motion"
 import { differenceInCalendarDays, parseISO, isAfter, isBefore, addDays, format } from "date-fns"
 import { useStore } from "@/store"
 import StatusBadge from "@/components/StatusBadge"
@@ -33,6 +33,7 @@ export default function BookingDetail() {
   const incidents = useStore((s) => s.incidents)
   const viewIncident = useStore((s) => s.viewIncident)
   const submitReview = useStore((s) => s.submitReview)
+  const cancelBooking = useStore((s) => s.cancelBooking)
 
   const [reviewRating, setReviewRating] = useState(5)
   const [reviewContent, setReviewContent] = useState("")
@@ -96,12 +97,11 @@ export default function BookingDetail() {
   }
 
   function handleCancel() {
-    useStore.setState((s) => ({
-      bookings: s.bookings.map((b) =>
-        b.id === id ? { ...b, status: "cancelled" as const } : b
-      ),
-    }))
-    setShowCancelModal(false)
+    if (!id) return
+    const ok = cancelBooking(id)
+    if (ok) {
+      setShowCancelModal(false)
+    }
   }
 
   function handleViewIncident(incidentId: string) {
@@ -339,7 +339,7 @@ export default function BookingDetail() {
         </motion.div>
       )}
 
-      {(booking.status === "pending" || booking.status === "confirmed") && (
+      {booking.status === "confirmed" && (
         <div className="pb-4">
           <button
             onClick={() => setShowCancelModal(true)}
@@ -348,6 +348,64 @@ export default function BookingDetail() {
             取消预约
           </button>
         </div>
+      )}
+
+      {booking.status === "cancelled" && booking.cancelledAt && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-gray-50 rounded-4xl shadow-card p-6 border-2 border-gray-200"
+        >
+          <h3 className="text-sm font-display font-bold text-gray-700 mb-3 flex items-center gap-2">
+            <Info className="w-4 h-4 text-gray-500" />
+            取消信息
+          </h3>
+          <p className="text-sm text-gray-600">
+            取消时间：{format(parseISO(booking.cancelledAt), "yyyy-MM-dd HH:mm")}
+          </p>
+          <p className="text-xs text-gray-400 mt-1">
+            笼位已释放，可重新预约
+          </p>
+        </motion.div>
+      )}
+
+      {booking.smsRecords && booking.smsRecords.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.35 }}
+          className="bg-white rounded-4xl shadow-card p-6"
+        >
+          <h3 className="text-sm font-display font-bold text-gray-800 mb-4 flex items-center gap-2">
+            <MessageSquare className="w-4 h-4 text-mint-500" />
+            通知记录
+          </h3>
+          <div className="space-y-3">
+            {booking.smsRecords.map((sms, idx) => (
+              <motion.div
+                key={sms.id}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: idx * 0.05 }}
+                className="bg-cream-100 rounded-2xl p-4"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-gray-700">{sms.recipient}</span>
+                    <span className="text-xs text-gray-400">{sms.recipientPhone}</span>
+                  </div>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-mint-400/20 text-mint-600 font-semibold">
+                    已发送
+                  </span>
+                </div>
+                <p className="text-xs text-gray-600 leading-relaxed">{sms.content}</p>
+                <p className="text-[10px] text-gray-400 mt-2">
+                  {format(parseISO(sms.sentAt), "yyyy-MM-dd HH:mm:ss")}
+                </p>
+              </motion.div>
+            ))}
+          </div>
+        </motion.div>
       )}
 
       {showCancelModal && (

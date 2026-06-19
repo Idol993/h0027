@@ -43,6 +43,14 @@ export interface Cage {
   dailyRate: number
 }
 
+export interface SmsRecord {
+  id: string
+  recipient: string
+  recipientPhone: string
+  content: string
+  sentAt: string
+}
+
 export interface Booking {
   id: string
   ownerId: string
@@ -57,6 +65,8 @@ export interface Booking {
   checkinRecord?: CheckinRecord
   bill?: Bill
   review?: Review
+  smsRecords?: SmsRecord[]
+  cancelledAt?: string
 }
 
 export interface CheckinRecord {
