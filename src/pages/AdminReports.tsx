@@ -1,0 +1,407 @@
+import { useState, useMemo } from "react"
+import { motion } from "framer-motion"
+import { Search, RotateCcw, Download, ChevronLeft, ChevronRight } from "lucide-react"
+import { format, parseISO, startOfMonth, endOfMonth, subMonths } from "date-fns"
+import { useStore } from "@/store"
+import StarRating from "@/components/StarRating"
+import StatusBadge from "@/components/StatusBadge"
+import type { IncidentType } from "@/types"
+
+type TabKey = "bookings" | "reviews" | "incidents"
+
+const incidentTypeOptions: { value: IncidentType | ""; label: string }[] = [
+  { value: "", label: "全部" },
+  { value: "vomiting", label: "呕吐" },
+  { value: "refusing_food", label: "拒食" },
+  { value: "injury", label: "受伤" },
+  { value: "other", label: "其他" },
+]
+
+const ratingOptions = [
+  { value: 0, label: "全部" },
+  { value: 1, label: "1星" },
+  { value: 2, label: "2星" },
+  { value: 3, label: "3星" },
+  { value: 4, label: "4星" },
+  { value: 5, label: "5星" },
+]
+
+const incidentTypeLabel: Record<IncidentType, string> = {
+  vomiting: "呕吐",
+  refusing_food: "拒食",
+  injury: "受伤",
+  other: "其他",
+}
+
+const PAGE_SIZE = 10
+
+export default function AdminReports() {
+  const getFilteredRecords = useStore((s) => s.getFilteredRecords)
+  const addNotification = useStore((s) => s.addNotification)
+  const bookings = useStore((s) => s.bookings)
+  const reviews = useStore((s) => s.reviews)
+  const incidents = useStore((s) => s.incidents)
+  const pets = useStore((s) => s.pets)
+  const users = useStore((s) => s.users)
+  const cages = useStore((s) => s.cages)
+
+  const [startDate, setStartDate] = useState(format(subMonths(new Date(), 1), "yyyy-MM-dd"))
+  const [endDate, setEndDate] = useState(format(new Date(), "yyyy-MM-dd"))
+  const [ratingFilter, setRatingFilter] = useState(0)
+  const [incidentTypeFilter, setIncidentTypeFilter] = useState<IncidentType | "">("")
+  const [activeTab, setActiveTab] = useState<TabKey>("bookings")
+  const [page, setPage] = useState(1)
+
+  const getPet = (petId: string) => pets.find((p) => p.id === petId)
+  const getOwner = (ownerId: string) => users.find((u) => u.id === ownerId)
+  const getCage = (cageId: string) => cages.find((c) => c.id === cageId)
+
+  const filteredBookings = useMemo(() => {
+    return getFilteredRecords({
+      startDate,
+      endDate,
+      rating: ratingFilter > 0 ? ratingFilter : undefined,
+      incidentType: incidentTypeFilter || undefined,
+    })
+  }, [getFilteredRecords, startDate, endDate, ratingFilter, incidentTypeFilter, bookings, incidents])
+
+  const filteredReviews = useMemo(() => {
+    return reviews.filter((r) => {
+      if (startDate && r.createdAt < startDate) return false
+      if (endDate && r.createdAt > endDate) return false
+      if (ratingFilter > 0 && r.rating !== ratingFilter) return false
+      return true
+    })
+  }, [reviews, startDate, endDate, ratingFilter])
+
+  const filteredIncidents = useMemo(() => {
+    return incidents.filter((i) => {
+      const iDate = i.createdAt.split("T")[0]
+      if (startDate && iDate < startDate) return false
+      if (endDate && iDate > endDate) return false
+      if (incidentTypeFilter && i.type !== incidentTypeFilter) return false
+      return true
+    })
+  }, [incidents, startDate, endDate, incidentTypeFilter])
+
+  const paginatedBookings = useMemo(() => {
+    const start = (page - 1) * PAGE_SIZE
+    return filteredBookings.slice(start, start + PAGE_SIZE)
+  }, [filteredBookings, page])
+
+  const paginatedReviews = useMemo(() => {
+    const start = (page - 1) * PAGE_SIZE
+    return filteredReviews.slice(start, start + PAGE_SIZE)
+  }, [filteredReviews, page])
+
+  const paginatedIncidents = useMemo(() => {
+    const start = (page - 1) * PAGE_SIZE
+    return filteredIncidents.slice(start, start + PAGE_SIZE)
+  }, [filteredIncidents, page])
+
+  const totalPages = useMemo(() => {
+    const count =
+      activeTab === "bookings"
+        ? filteredBookings.length
+        : activeTab === "reviews"
+        ? filteredReviews.length
+        : filteredIncidents.length
+    return Math.max(1, Math.ceil(count / PAGE_SIZE))
+  }, [activeTab, filteredBookings, filteredReviews, filteredIncidents])
+
+  const handleSearch = () => {
+    setPage(1)
+  }
+
+  const handleReset = () => {
+    setStartDate(format(subMonths(new Date(), 1), "yyyy-MM-dd"))
+    setEndDate(format(new Date(), "yyyy-MM-dd"))
+    setRatingFilter(0)
+    setIncidentTypeFilter("")
+    setPage(1)
+  }
+
+  const handleExport = () => {
+    addNotification("报表已生成", "success")
+  }
+
+  const handleTabChange = (tab: TabKey) => {
+    setActiveTab(tab)
+    setPage(1)
+  }
+
+  return (
+    <div className="min-h-screen bg-cream-100 flex">
+      <div className="w-80 bg-white shadow-card p-6 flex flex-col shrink-0">
+        <h2 className="text-lg font-display font-bold text-gray-800 mb-6">筛选条件</h2>
+
+        <div className="space-y-5 flex-1">
+          <div>
+            <label className="block text-sm font-semibold text-gray-600 mb-1.5">日期范围</label>
+            <div className="space-y-2">
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-coral-400/50 focus:border-coral-400"
+              />
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-coral-400/50 focus:border-coral-400"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-gray-600 mb-1.5">评价星级</label>
+            <select
+              value={ratingFilter}
+              onChange={(e) => setRatingFilter(Number(e.target.value))}
+              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-coral-400/50 focus:border-coral-400"
+            >
+              {ratingOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-gray-600 mb-1.5">异常类型</label>
+            <select
+              value={incidentTypeFilter}
+              onChange={(e) => setIncidentTypeFilter(e.target.value as IncidentType | "")}
+              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-coral-400/50 focus:border-coral-400"
+            >
+              {incidentTypeOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={handleSearch}
+              className="flex-1 py-2.5 bg-coral-400 text-white font-bold rounded-xl flex items-center justify-center gap-1.5 hover:bg-coral-500 transition-colors"
+            >
+              <Search className="w-4 h-4" />
+              查询
+            </button>
+            <button
+              onClick={handleReset}
+              className="flex-1 py-2.5 bg-gray-100 text-gray-600 font-bold rounded-xl flex items-center justify-center gap-1.5 hover:bg-gray-200 transition-colors"
+            >
+              <RotateCcw className="w-4 h-4" />
+              重置
+            </button>
+          </div>
+        </div>
+
+        <button
+          onClick={handleExport}
+          className="mt-6 w-full py-3 bg-mint-400 text-white font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-mint-500 transition-colors"
+        >
+          <Download className="w-5 h-5" />
+          导出报表
+        </button>
+      </div>
+
+      <div className="flex-1 p-6">
+        <div className="flex gap-2 mb-5">
+          {([
+            { key: "bookings" as TabKey, label: "预约记录" },
+            { key: "reviews" as TabKey, label: "评价记录" },
+            { key: "incidents" as TabKey, label: "异常记录" },
+          ]).map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => handleTabChange(tab.key)}
+              className={`px-5 py-2.5 rounded-xl font-bold text-sm transition-colors ${
+                activeTab === tab.key
+                  ? "bg-coral-400 text-white"
+                  : "bg-white text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        <motion.div
+          key={activeTab}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-white rounded-2xl shadow-card overflow-hidden"
+        >
+          {activeTab === "bookings" && (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 text-gray-500">
+                  <th className="text-left py-3 px-4 font-semibold">编号</th>
+                  <th className="text-left py-3 px-4 font-semibold">宠物名</th>
+                  <th className="text-left py-3 px-4 font-semibold">主人</th>
+                  <th className="text-left py-3 px-4 font-semibold">笼位</th>
+                  <th className="text-left py-3 px-4 font-semibold">起止日期</th>
+                  <th className="text-left py-3 px-4 font-semibold">状态</th>
+                  <th className="text-right py-3 px-4 font-semibold">费用</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paginatedBookings.map((b) => {
+                  const pet = getPet(b.petId)
+                  const owner = getOwner(b.ownerId)
+                  const cage = getCage(b.cageId)
+                  return (
+                    <tr key={b.id} className="border-t border-gray-100 hover:bg-gray-50/50">
+                      <td className="py-3 px-4 text-gray-600">{b.id.slice(-4).toUpperCase()}</td>
+                      <td className="py-3 px-4 font-semibold text-gray-800">{pet?.name ?? "未知"}</td>
+                      <td className="py-3 px-4 text-gray-600">{owner?.name ?? "未知"}</td>
+                      <td className="py-3 px-4 text-gray-600">{cage?.name ?? "-"}</td>
+                      <td className="py-3 px-4 text-gray-600">
+                        {format(parseISO(b.startDate), "MM/dd")} - {format(parseISO(b.endDate), "MM/dd")}
+                      </td>
+                      <td className="py-3 px-4"><StatusBadge status={b.status} /></td>
+                      <td className="py-3 px-4 text-right font-semibold text-gray-800">¥{b.dailyRate}/天</td>
+                    </tr>
+                  )
+                })}
+                {paginatedBookings.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="py-12 text-center text-gray-400">暂无数据</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          )}
+
+          {activeTab === "reviews" && (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 text-gray-500">
+                  <th className="text-left py-3 px-4 font-semibold">宠物名</th>
+                  <th className="text-left py-3 px-4 font-semibold">主人</th>
+                  <th className="text-left py-3 px-4 font-semibold">星级</th>
+                  <th className="text-left py-3 px-4 font-semibold">评价内容</th>
+                  <th className="text-left py-3 px-4 font-semibold">日期</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paginatedReviews.map((r) => {
+                  const booking = bookings.find((b) => b.id === r.bookingId)
+                  const pet = booking ? getPet(booking.petId) : undefined
+                  const owner = getOwner(r.ownerId)
+                  return (
+                    <tr key={r.bookingId} className="border-t border-gray-100 hover:bg-gray-50/50">
+                      <td className="py-3 px-4 font-semibold text-gray-800">{pet?.name ?? "未知"}</td>
+                      <td className="py-3 px-4 text-gray-600">{owner?.name ?? "未知"}</td>
+                      <td className="py-3 px-4"><StarRating rating={r.rating} size="sm" /></td>
+                      <td className="py-3 px-4 text-gray-600 max-w-xs truncate">{r.content}</td>
+                      <td className="py-3 px-4 text-gray-400">{format(parseISO(r.createdAt), "yyyy/MM/dd")}</td>
+                    </tr>
+                  )
+                })}
+                {paginatedReviews.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="py-12 text-center text-gray-400">暂无数据</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          )}
+
+          {activeTab === "incidents" && (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 text-gray-500">
+                  <th className="text-left py-3 px-4 font-semibold">宠物名</th>
+                  <th className="text-left py-3 px-4 font-semibold">类型</th>
+                  <th className="text-left py-3 px-4 font-semibold">描述</th>
+                  <th className="text-left py-3 px-4 font-semibold">处理状态</th>
+                  <th className="text-left py-3 px-4 font-semibold">时间</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paginatedIncidents.map((i) => {
+                  const booking = bookings.find((b) => b.id === i.bookingId)
+                  const pet = booking ? getPet(booking.petId) : undefined
+                  return (
+                    <tr key={i.id} className="border-t border-gray-100 hover:bg-gray-50/50">
+                      <td className="py-3 px-4 font-semibold text-gray-800">{pet?.name ?? "未知"}</td>
+                      <td className="py-3 px-4">
+                        <span className="text-xs px-2 py-1 rounded-lg bg-amber-100 text-amber-700 font-semibold">
+                          {incidentTypeLabel[i.type]}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-gray-600 max-w-xs truncate">{i.description}</td>
+                      <td className="py-3 px-4">
+                        <span
+                          className={`text-xs font-semibold ${
+                            i.notifyStatus === "viewed"
+                              ? "text-mint-400"
+                              : i.notifyStatus === "escalated"
+                              ? "text-red-500"
+                              : i.notifyStatus === "reminded"
+                              ? "text-coral-400"
+                              : "text-amber-500"
+                          }`}
+                        >
+                          {i.notifyStatus === "sent"
+                            ? "已通知"
+                            : i.notifyStatus === "viewed"
+                            ? "已查看"
+                            : i.notifyStatus === "reminded"
+                            ? "已提醒"
+                            : "已升级"}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-gray-400">
+                        {format(parseISO(i.createdAt), "yyyy/MM/dd HH:mm")}
+                      </td>
+                    </tr>
+                  )
+                })}
+                {paginatedIncidents.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="py-12 text-center text-gray-400">暂无数据</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          )}
+        </motion.div>
+
+        <div className="flex items-center justify-between mt-4">
+          <p className="text-sm text-gray-500">
+            共{" "}
+            {activeTab === "bookings"
+              ? filteredBookings.length
+              : activeTab === "reviews"
+              ? filteredReviews.length
+              : filteredIncidents.length}{" "}
+            条记录
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="p-2 rounded-xl bg-white shadow-card disabled:opacity-40 hover:bg-gray-50 transition-colors"
+            >
+              <ChevronLeft className="w-5 h-5 text-gray-600" />
+            </button>
+            <span className="text-sm text-gray-600 font-semibold">
+              {page} / {totalPages}
+            </span>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              className="p-2 rounded-xl bg-white shadow-card disabled:opacity-40 hover:bg-gray-50 transition-colors"
+            >
+              <ChevronRight className="w-5 h-5 text-gray-600" />
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
