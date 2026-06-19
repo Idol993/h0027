@@ -25,7 +25,7 @@ const incidentLabels: Record<string, string> = {
 export default function BookingDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const getBookingById = useStore((s) => s.getBookingById)
+  const bookings = useStore((s) => s.bookings)
   const cages = useStore((s) => s.cages)
   const pets = useStore((s) => s.pets)
   const users = useStore((s) => s.users)
@@ -42,8 +42,8 @@ export default function BookingDetail() {
   const [showCancelModal, setShowCancelModal] = useState(false)
 
   const booking = useMemo(() => {
-    return id ? getBookingById(id) : undefined
-  }, [id, getBookingById])
+    return id ? bookings.find((b) => b.id === id) : undefined
+  }, [id, bookings])
 
   const refundInfo = useMemo(() => {
     if (!id) return null

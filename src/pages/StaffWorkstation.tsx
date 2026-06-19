@@ -24,13 +24,13 @@ export default function StaffWorkstation() {
   const inResidence = useMemo(
     () => bookings.filter((b) => {
       if (b.status === "checked_in") {
+        const vd = parseISO(viewDate)
         if (b.checkinRecord) {
           const ci = parseISO(b.checkinRecord.checkedInAt)
-          const vd = parseISO(viewDate)
           const ed = parseISO(b.endDate)
-          return ci <= vd && ed >= vd
+          return (isSameDay(ci, vd) || ci < vd) && (isSameDay(ed, vd) || ed > vd)
         }
-        return true
+        return isSameDay(parseISO(b.startDate), vd) || parseISO(b.startDate) < vd
       }
       return false
     }),

@@ -118,11 +118,11 @@ export default function AdminReports() {
       ? Math.round((filteredReviews.reduce((s, r) => s + r.rating, 0) / filteredReviews.length) * 10) / 10
       : 0
 
-    const depositIncome = filteredBookings.reduce((sum, b) => {
+    const depositIncome = completedBookings.reduce((sum, b) => {
       const p = b.payments?.find((p) => p.type === "deposit")
       return sum + (p?.amount ?? 0)
     }, 0)
-    const balanceIncome = filteredBookings.reduce((sum, b) => {
+    const balanceIncome = completedBookings.reduce((sum, b) => {
       const p = b.payments?.find((p) => p.type === "balance")
       return sum + (p?.amount ?? 0)
     }, 0)
@@ -132,7 +132,8 @@ export default function AdminReports() {
     const extrasIncome = completedBookings.reduce((sum, b) => {
       return sum + (b.bill?.extras?.reduce((s, e) => s + e.amount, 0) ?? 0)
     }, 0)
-    const netIncome = depositIncome + balanceIncome - refunds + extrasIncome
+    const roomIncome = completedBookings.reduce((sum, b) => sum + (b.bill?.subtotal ?? 0), 0)
+    const netIncome = totalIncome - refunds
 
     return {
       totalIncome,
@@ -143,6 +144,7 @@ export default function AdminReports() {
       balanceIncome,
       refunds,
       extrasIncome,
+      roomIncome,
       netIncome,
     }
   }, [filteredBookings, filteredReviews])
@@ -248,9 +250,10 @@ export default function AdminReports() {
       balanceIncome: summaryStats.balanceIncome,
       refunds: summaryStats.refunds,
       extrasIncome: summaryStats.extrasIncome,
+      roomIncome: summaryStats.roomIncome,
       netIncome: summaryStats.netIncome,
     }
-  }, [filteredBookings, filteredReviews, filteredIncidents, bookings, pets, users, cages, summaryStats.totalIncome, summaryStats.avgRating, summaryStats.depositIncome, summaryStats.balanceIncome, summaryStats.refunds, summaryStats.extrasIncome, summaryStats.netIncome])
+  }, [filteredBookings, filteredReviews, filteredIncidents, bookings, pets, users, cages, summaryStats.totalIncome, summaryStats.avgRating, summaryStats.depositIncome, summaryStats.balanceIncome, summaryStats.refunds, summaryStats.extrasIncome, summaryStats.roomIncome, summaryStats.netIncome])
 
   function generateCSV(): string {
     const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`
@@ -259,13 +262,14 @@ export default function AdminReports() {
     lines.push(`筛选日期,${esc(startDate)} ~ ${esc(endDate)}`)
     lines.push(`生成时间,${esc(format(new Date(), "yyyy-MM-dd HH:mm:ss"))}`)
     lines.push("")
-    lines.push("=== 财务汇总 ===")
-    lines.push(`收入总额,${esc(exportMonthlySummary.totalIncome)}`)
-    lines.push(`订金收入,${esc(exportMonthlySummary.depositIncome)}`)
-    lines.push(`尾款收入,${esc(exportMonthlySummary.balanceIncome)}`)
+    lines.push("=== 财务汇总（账单口径） ===")
+    lines.push(`营业总额,${esc(exportMonthlySummary.totalIncome)}`)
+    lines.push(`住宿费收入,${esc(exportMonthlySummary.roomIncome)}`)
+    lines.push(`额外费用收入,${esc(exportMonthlySummary.extrasIncome)}`)
     lines.push(`退款支出,${esc(exportMonthlySummary.refunds)}`)
-    lines.push(`额外费用,${esc(exportMonthlySummary.extrasIncome)}`)
     lines.push(`净收入,${esc(exportMonthlySummary.netIncome)}`)
+    lines.push(`已收订金,${esc(exportMonthlySummary.depositIncome)}`)
+    lines.push(`已收尾款,${esc(exportMonthlySummary.balanceIncome)}`)
     lines.push(`已完成订单数,${esc(exportMonthlySummary.orderDetails.length)}`)
     lines.push(`平均评分,${esc(exportMonthlySummary.avgRating)}`)
     lines.push("")
@@ -342,13 +346,14 @@ export default function AdminReports() {
     lines.push(`筛选日期：${startDate} ~ ${endDate}`)
     lines.push(`生成时间：${format(new Date(), "yyyy-MM-dd HH:mm:ss")}`)
     lines.push("")
-    lines.push("【财务汇总】")
-    lines.push(`  收入总额：¥${exportMonthlySummary.totalIncome.toLocaleString()}`)
-    lines.push(`  订金收入：¥${exportMonthlySummary.depositIncome.toLocaleString()}`)
-    lines.push(`  尾款收入：¥${exportMonthlySummary.balanceIncome.toLocaleString()}`)
-    lines.push(`  退款支出：-¥${exportMonthlySummary.refunds.toLocaleString()}`)
+    lines.push("【财务汇总】（账单口径）")
+    lines.push(`  营业总额：¥${exportMonthlySummary.totalIncome.toLocaleString()}`)
+    lines.push(`  住宿费收：¥${exportMonthlySummary.roomIncome.toLocaleString()}`)
     lines.push(`  额外费用：+¥${exportMonthlySummary.extrasIncome.toLocaleString()}`)
+    lines.push(`  退款支出：-¥${exportMonthlySummary.refunds.toLocaleString()}`)
     lines.push(`  净  收  入：¥${exportMonthlySummary.netIncome.toLocaleString()}`)
+    lines.push(`  已收订金：¥${exportMonthlySummary.depositIncome.toLocaleString()}`)
+    lines.push(`  已收尾款：¥${exportMonthlySummary.balanceIncome.toLocaleString()}`)
     lines.push(`  已完成订单：${exportMonthlySummary.orderDetails.length} 笔`)
     lines.push(`  平均评分：${exportMonthlySummary.avgRating} 星`)
     lines.push("")
@@ -621,20 +626,26 @@ export default function AdminReports() {
 
         <div className="grid grid-cols-4 gap-4 mb-6">
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="bg-mint-50 border-2 border-mint-200 rounded-2xl p-4">
-            <p className="text-xs font-semibold text-mint-700 mb-1">订金收入</p>
-            <p className="text-xl font-extrabold text-mint-600">¥{summaryStats.depositIncome.toLocaleString()}</p>
+            <p className="text-xs font-semibold text-mint-700 mb-1">住宿费收入</p>
+            <p className="text-xl font-extrabold text-mint-600">¥{summaryStats.roomIncome.toLocaleString()}</p>
+            <p className="text-[10px] text-mint-600/70 mt-1">
+              订金 ¥{summaryStats.depositIncome.toLocaleString()} · 尾款 ¥{summaryStats.balanceIncome.toLocaleString()}
+            </p>
           </motion.div>
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }} className="bg-blue-50 border-2 border-blue-200 rounded-2xl p-4">
-            <p className="text-xs font-semibold text-blue-700 mb-1">尾款收入</p>
-            <p className="text-xl font-extrabold text-blue-600">¥{summaryStats.balanceIncome.toLocaleString()}</p>
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }} className="bg-purple-50 border-2 border-purple-200 rounded-2xl p-4">
+            <p className="text-xs font-semibold text-purple-700 mb-1">额外费用收入</p>
+            <p className="text-xl font-extrabold text-purple-600">+¥{summaryStats.extrasIncome.toLocaleString()}</p>
+            <p className="text-[10px] text-purple-600/70 mt-1">账单口径，与订单一致</p>
           </motion.div>
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }} className="bg-coral-50 border-2 border-coral-200 rounded-2xl p-4">
             <p className="text-xs font-semibold text-coral-700 mb-1">退款支出</p>
             <p className="text-xl font-extrabold text-coral-500">-¥{summaryStats.refunds.toLocaleString()}</p>
+            <p className="text-[10px] text-coral-600/70 mt-1">取消订单退款合计</p>
           </motion.div>
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.55 }} className="bg-purple-50 border-2 border-purple-200 rounded-2xl p-4">
-            <p className="text-xs font-semibold text-purple-700 mb-1">额外费用</p>
-            <p className="text-xl font-extrabold text-purple-600">+¥{summaryStats.extrasIncome.toLocaleString()}</p>
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.55 }} className="bg-gray-50 border-2 border-gray-200 rounded-2xl p-4">
+            <p className="text-xs font-semibold text-gray-700 mb-1">净收入</p>
+            <p className="text-xl font-extrabold text-gray-800">¥{summaryStats.netIncome.toLocaleString()}</p>
+            <p className="text-[10px] text-gray-500 mt-1">营业总额 - 退款支出</p>
           </motion.div>
         </div>
 
@@ -871,24 +882,26 @@ export default function AdminReports() {
                 </div>
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div className="bg-mint-50 rounded-xl p-3 flex justify-between items-center">
-                    <span className="text-mint-700 font-medium">订金收入</span>
-                    <span className="font-bold text-mint-600">¥{exportMonthlySummary.depositIncome.toLocaleString()}</span>
-                  </div>
-                  <div className="bg-blue-50 rounded-xl p-3 flex justify-between items-center">
-                    <span className="text-blue-700 font-medium">尾款收入</span>
-                    <span className="font-bold text-blue-600">¥{exportMonthlySummary.balanceIncome.toLocaleString()}</span>
-                  </div>
-                  <div className="bg-coral-50 rounded-xl p-3 flex justify-between items-center">
-                    <span className="text-coral-700 font-medium">退款支出</span>
-                    <span className="font-bold text-coral-500">-¥{exportMonthlySummary.refunds.toLocaleString()}</span>
+                    <span className="text-mint-700 font-medium">住宿费收入</span>
+                    <span className="font-bold text-mint-600">¥{exportMonthlySummary.roomIncome.toLocaleString()}</span>
                   </div>
                   <div className="bg-purple-50 rounded-xl p-3 flex justify-between items-center">
                     <span className="text-purple-700 font-medium">额外费用</span>
                     <span className="font-bold text-purple-600">+¥{exportMonthlySummary.extrasIncome.toLocaleString()}</span>
                   </div>
+                  <div className="bg-coral-50 rounded-xl p-3 flex justify-between items-center">
+                    <span className="text-coral-700 font-medium">退款支出</span>
+                    <span className="font-bold text-coral-500">-¥{exportMonthlySummary.refunds.toLocaleString()}</span>
+                  </div>
+                  <div className="bg-blue-50 rounded-xl p-3 flex justify-between items-center">
+                    <span className="text-blue-700 font-medium">已收订金/尾款</span>
+                    <span className="font-bold text-blue-600">
+                      ¥{(exportMonthlySummary.depositIncome + exportMonthlySummary.balanceIncome).toLocaleString()}
+                    </span>
+                  </div>
                 </div>
                 <div className="mt-3 bg-gray-50 rounded-xl p-3 flex justify-between items-center">
-                  <span className="text-gray-700 font-semibold">净收入</span>
+                  <span className="text-gray-700 font-semibold">净收入（账单口径）</span>
                   <span className="text-xl font-extrabold text-gray-800">¥{exportMonthlySummary.netIncome.toLocaleString()}</span>
                 </div>
               </div>
