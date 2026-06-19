@@ -34,6 +34,7 @@ export default function BookingDetail() {
   const viewIncident = useStore((s) => s.viewIncident)
   const submitReview = useStore((s) => s.submitReview)
   const cancelBooking = useStore((s) => s.cancelBooking)
+  const calculateRefund = useStore((s) => s.calculateRefund)
 
   const [reviewRating, setReviewRating] = useState(5)
   const [reviewContent, setReviewContent] = useState("")
@@ -43,6 +44,11 @@ export default function BookingDetail() {
   const booking = useMemo(() => {
     return id ? getBookingById(id) : undefined
   }, [id, getBookingById])
+
+  const refundInfo = useMemo(() => {
+    if (!id) return null
+    return calculateRefund(id)
+  }, [id, calculateRefund])
 
   const cage = useMemo(() => {
     return booking ? cages.find((c) => c.id === booking.cageId) : undefined
@@ -98,8 +104,8 @@ export default function BookingDetail() {
 
   function handleCancel() {
     if (!id) return
-    const ok = cancelBooking(id)
-    if (ok) {
+    const result = cancelBooking(id)
+    if (result.success) {
       setShowCancelModal(false)
     }
   }
@@ -165,6 +171,56 @@ export default function BookingDetail() {
           </div>
         </motion.div>
       )}
+
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.12 }}
+        className="bg-white rounded-4xl shadow-card p-6"
+      >
+        <h3 className="text-sm font-display font-bold text-gray-800 mb-3 flex items-center gap-2">
+          <FileText className="w-4 h-4 text-coral-400" />
+          支付状态
+        </h3>
+        <div className="space-y-2 text-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-gray-600">订单总额</span>
+            <span className="font-bold text-gray-800">¥{booking.totalAmount}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-gray-600">订金（30%）</span>
+            <span className="font-bold text-mint-500">¥{booking.depositAmount}
+              {booking.payments?.some((p) => p.type === "deposit") && (
+                <span className="text-[10px] px-1.5 py-0.5 ml-1.5 rounded bg-mint-100 text-mint-600 align-middle">已支付</span>
+              )}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-gray-600">尾款（入住时支付）</span>
+            <span className="font-bold text-gray-700">¥{booking.balanceAmount}
+              {booking.payments?.some((p) => p.type === "balance") && (
+                <span className="text-[10px] px-1.5 py-0.5 ml-1.5 rounded bg-mint-100 text-mint-600 align-middle">已支付</span>
+              )}
+            </span>
+          </div>
+        </div>
+        {booking.payments && booking.payments.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-gray-100">
+            <p className="text-xs font-semibold text-gray-500 mb-2">支付记录</p>
+            <div className="space-y-2">
+              {booking.payments.map((p) => (
+                <div key={p.id} className="flex items-center justify-between text-xs bg-cream-100 rounded-xl px-3 py-2">
+                  <span className="text-gray-600">
+                    {p.type === "deposit" ? "订金" : "尾款"}
+                    <span className="text-gray-400 ml-2">{format(parseISO(p.paidAt), "MM-dd HH:mm")}</span>
+                  </span>
+                  <span className="font-bold text-mint-500">+¥{p.amount}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </motion.div>
 
       {booking.checkinRecord && (
         <motion.div
@@ -363,9 +419,39 @@ export default function BookingDetail() {
           <p className="text-sm text-gray-600">
             取消时间：{format(parseISO(booking.cancelledAt), "yyyy-MM-dd HH:mm")}
           </p>
+          <p className="text-xs text-gray-500 mt-1">
+            {booking.cancellationNote}
+          </p>
           <p className="text-xs text-gray-400 mt-1">
             笼位已释放，可重新预约
           </p>
+        </motion.div>
+      )}
+
+      {booking.refunds && booking.refunds.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.02 }}
+          className="bg-coral-50 rounded-4xl shadow-card p-6 border-2 border-coral-200"
+        >
+          <h3 className="text-sm font-display font-bold text-coral-700 mb-3">退款记录</h3>
+          {booking.refunds.map((r) => (
+            <div key={r.id} className="bg-white rounded-2xl p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-semibold text-gray-700">
+                  {r.reason === "cancellation" ? "取消退款" : "退款"}
+                </span>
+                <span className="text-lg font-extrabold text-coral-500">-¥{r.amount}</span>
+              </div>
+              <p className="text-xs text-gray-500">
+                距离入住 {r.daysBeforeCheckin} 天
+              </p>
+              <p className="text-[10px] text-gray-400 mt-1">
+                {format(parseISO(r.refundedAt), "yyyy-MM-dd HH:mm")}
+              </p>
+            </div>
+          ))}
         </motion.div>
       )}
 
@@ -409,42 +495,64 @@ export default function BookingDetail() {
       )}
 
       {showCancelModal && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
-          onClick={() => setShowCancelModal(false)}
-        >
+        <AnimatePresence>
           <motion.div
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            onClick={(e) => e.stopPropagation()}
-            className="bg-white rounded-4xl shadow-card-hover p-6 max-w-sm w-full"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+            onClick={() => setShowCancelModal(false)}
           >
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-display font-bold text-gray-800">确认取消</h3>
-              <button onClick={() => setShowCancelModal(false)} className="text-gray-400">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <p className="text-sm text-gray-500 mb-6">确定要取消此预约吗？此操作不可撤销。</p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowCancelModal(false)}
-                className="flex-1 py-2.5 bg-gray-100 text-gray-600 font-semibold rounded-2xl hover:bg-gray-200 transition-colors text-sm"
-              >
-                再想想
-              </button>
-              <button
-                onClick={handleCancel}
-                className="flex-1 py-2.5 bg-coral-400 text-white font-bold rounded-2xl hover:bg-coral-500 transition-colors text-sm"
-              >
-                确认取消
-              </button>
-            </div>
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.8, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-4xl shadow-card-hover p-6 max-w-sm w-full"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-base font-display font-bold text-gray-800">确认取消</h3>
+                <button onClick={() => setShowCancelModal(false)} className="text-gray-400">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <p className="text-sm text-gray-500 mb-4">确定要取消此预约吗？此操作不可撤销。</p>
+              {refundInfo && (
+                <div className="bg-amber-50 rounded-2xl p-4 mb-6">
+                  <p className="text-xs font-bold text-amber-700 mb-2">退款说明</p>
+                  <p className="text-sm text-gray-700">
+                    距离入住 <span className="font-bold text-amber-600">{refundInfo.daysBeforeCheckin}</span> 天
+                  </p>
+                  <p className="text-sm text-gray-700 mt-1">
+                    可退比例：<span className="font-bold text-amber-600">{Math.round(refundInfo.rate * 100)}%</span>
+                  </p>
+                  <p className="text-lg font-extrabold text-coral-500 mt-2">
+                    预计退还：¥{refundInfo.refundAmount}
+                  </p>
+                  {refundInfo.refundAmount === 0 && (
+                    <p className="text-xs text-amber-600 mt-1">
+                      距离入住不足3天，订金不予退还
+                    </p>
+                  )}
+                </div>
+              )}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowCancelModal(false)}
+                  className="flex-1 py-2.5 bg-gray-100 text-gray-600 font-semibold rounded-2xl hover:bg-gray-200 transition-colors text-sm"
+                >
+                  再想想
+                </button>
+                <button
+                  onClick={handleCancel}
+                  className="flex-1 py-2.5 bg-coral-400 text-white font-bold rounded-2xl hover:bg-coral-500 transition-colors text-sm"
+                >
+                  确认取消
+                </button>
+              </div>
+            </motion.div>
           </motion.div>
-        </motion.div>
+        </AnimatePresence>
       )}
     </div>
   )

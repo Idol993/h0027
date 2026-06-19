@@ -51,6 +51,24 @@ export interface SmsRecord {
   sentAt: string
 }
 
+export type PaymentType = "deposit" | "balance"
+export type RefundReason = "cancellation"
+
+export interface Payment {
+  id: string
+  type: PaymentType
+  amount: number
+  paidAt: string
+}
+
+export interface Refund {
+  id: string
+  amount: number
+  reason: RefundReason
+  daysBeforeCheckin: number
+  refundedAt: string
+}
+
 export interface Booking {
   id: string
   ownerId: string
@@ -62,11 +80,17 @@ export interface Booking {
   status: BookingStatus
   createdAt: string
   dailyRate: number
+  totalAmount: number
+  depositAmount: number
+  balanceAmount: number
+  payments: Payment[]
+  refunds: Refund[]
   checkinRecord?: CheckinRecord
   bill?: Bill
   review?: Review
   smsRecords?: SmsRecord[]
   cancelledAt?: string
+  cancellationNote?: string
 }
 
 export interface CheckinRecord {
@@ -140,4 +164,7 @@ export interface ReportFilters {
   endDate?: string
   rating?: number
   incidentType?: IncidentType | ""
+  ownerId?: string
+  cageSize?: CageSize | ""
+  status?: BookingStatus | ""
 }

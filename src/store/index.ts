@@ -16,6 +16,8 @@ import type {
   CheckinRecord,
   IncidentType,
   SmsRecord,
+  Payment,
+  Refund,
 } from "@/types"
 import {
   mockUsers,
@@ -57,7 +59,8 @@ interface StoreActions {
   createBooking(data: { ownerId: string; petId: string; cageId: string; startDate: string; endDate: string; dailyRate: number }): Booking
   getBookingsByOwner(ownerId: string): Booking[]
   getBookingById(id: string): Booking | undefined
-  cancelBooking(bookingId: string): boolean
+  cancelBooking(bookingId: string): { success: boolean; refundAmount: number }
+  calculateRefund(bookingId: string): { refundAmount: number; daysBeforeCheckin: number; rate: number }
   checkInBooking(bookingId: string, record: Omit<CheckinRecord, "bookingId">): void
   addCareDiary(bookingId: string, content: string, images: string[], createdBy: string): CareDiary | null
   addIncident(bookingId: string, type: IncidentType, description: string, photos: string[], createdBy: string): Incident
@@ -146,7 +149,18 @@ export const useStore = create<Store>()(
         const pet = pets.find((p) => p.id === data.petId)
         const cage = cages.find((c) => c.id === data.cageId)
         const days = Math.max(1, differenceInCalendarDays(parseISO(data.endDate), parseISO(data.startDate)))
-        const total = days * data.dailyRate
+        const totalAmount = days * data.dailyRate
+        const depositAmount = Math.round(totalAmount * 0.3)
+        const balanceAmount = totalAmount - depositAmount
+
+        const payments: Payment[] = [
+          {
+            id: genId(),
+            type: "deposit",
+            amount: depositAmount,
+            paidAt: new Date().toISOString(),
+          },
+        ]
 
         const smsRecords: SmsRecord[] = []
         if (owner) {
@@ -154,7 +168,7 @@ export const useStore = create<Store>()(
             id: genId(),
             recipient: owner.name,
             recipientPhone: owner.phone,
-            content: `【毛孩寄养】${owner.name}您好！您的宠物${pet?.name ?? ""}已成功预约${data.startDate}至${data.endDate}的寄养服务，笼位：${cage?.name ?? ""}，预计费用：¥${total}。请按时送宠入住。`,
+            content: `【毛孩寄养】${owner.name}您好！您的宠物${pet?.name ?? ""}已成功预约${data.startDate}至${data.endDate}的寄养服务，笼位：${cage?.name ?? ""}，总费用：¥${totalAmount}（订金¥${depositAmount}已付，尾款¥${balanceAmount}入住时支付）。请按时送宠入住。`,
             sentAt: new Date().toISOString(),
           })
         }
@@ -174,10 +188,15 @@ export const useStore = create<Store>()(
           ...data,
           status: "confirmed",
           createdAt: new Date().toISOString().split("T")[0],
+          totalAmount,
+          depositAmount,
+          balanceAmount,
+          payments,
+          refunds: [],
           smsRecords,
         }
         set((state) => ({ bookings: [...state.bookings, booking] }))
-        get().addNotification("预约创建成功", "success")
+        get().addNotification("预约创建成功，订金已支付", "success")
         return booking
       },
 
@@ -191,30 +210,81 @@ export const useStore = create<Store>()(
         return get().bookings.find((b) => b.id === id)
       },
 
+      calculateRefund(bookingId) {
+        const booking = get().bookings.find((b) => b.id === bookingId)
+        if (!booking) return { refundAmount: 0, daysBeforeCheckin: 0, rate: 0 }
+        const today = new Date().toISOString().split("T")[0]
+        const daysBeforeCheckin = differenceInCalendarDays(parseISO(booking.startDate), parseISO(today))
+        let rate = 0
+        if (daysBeforeCheckin >= 7) rate = 1
+        else if (daysBeforeCheckin >= 3) rate = 0.5
+        const refundAmount = Math.round(booking.depositAmount * rate)
+        return { refundAmount, daysBeforeCheckin, rate }
+      },
+
       cancelBooking(bookingId) {
         const booking = get().bookings.find((b) => b.id === bookingId)
-        if (!booking) return false
-        if (booking.status !== "confirmed" && booking.status !== "pending") return false
+        if (!booking) return { success: false, refundAmount: 0 }
+        if (booking.status !== "confirmed" && booking.status !== "pending") return { success: false, refundAmount: 0 }
+
+        const { refundAmount, daysBeforeCheckin, rate } = get().calculateRefund(bookingId)
+        const refund: Refund = {
+          id: genId(),
+          amount: refundAmount,
+          reason: "cancellation",
+          daysBeforeCheckin,
+          refundedAt: new Date().toISOString(),
+        }
+        const cancellationNote = rate === 1
+          ? `距离入住${daysBeforeCheckin}天，订金全额退还`
+          : rate === 0.5
+          ? `距离入住${daysBeforeCheckin}天，退还订金50%`
+          : `距离入住不足3天，订金不予退还`
+
         set((state) => ({
           bookings: state.bookings.map((b) =>
             b.id === bookingId
-              ? { ...b, status: "cancelled" as const, cancelledAt: new Date().toISOString() }
+              ? {
+                  ...b,
+                  status: "cancelled" as const,
+                  cancelledAt: new Date().toISOString(),
+                  refunds: [...b.refunds, refund],
+                  cancellationNote,
+                }
               : b
           ),
         }))
-        get().addNotification("预约已取消", "success")
-        return true
+        get().addNotification(`预约已取消，${refundAmount > 0 ? `退款¥${refundAmount}` : "无退款"}`, "success")
+        return { success: true, refundAmount }
       },
 
       checkInBooking(bookingId, record) {
+        const booking = get().bookings.find((b) => b.id === bookingId)
+        if (!booking) return
+
+        const payments: Payment[] = [...booking.payments]
+        if (!payments.some((p) => p.type === "balance")) {
+          payments.push({
+            id: genId(),
+            type: "balance",
+            amount: booking.balanceAmount,
+            paidAt: new Date().toISOString(),
+          })
+        }
+
         set((state) => ({
           bookings: state.bookings.map((b) =>
             b.id === bookingId
-              ? { ...b, status: "checked_in" as const, checkinRecord: { ...record, bookingId } }
+              ? {
+                  ...b,
+                  status: "checked_in" as const,
+                  checkinRecord: { ...record, bookingId },
+                  payments,
+                }
               : b
           ),
         }))
-        get().addNotification("入住登记完成", "success")
+        get().addNotification("入住登记完成，尾款已结清", "success")
       },
 
       addCareDiary(bookingId, content, images, createdBy) {
@@ -396,7 +466,7 @@ export const useStore = create<Store>()(
       },
 
       getFilteredRecords(filters) {
-        const { bookings, incidents } = get()
+        const { bookings, incidents, cages } = get()
         return bookings.filter((b) => {
           if (filters.startDate && b.startDate < filters.startDate) return false
           if (filters.endDate && b.endDate > filters.endDate) return false
@@ -409,6 +479,12 @@ export const useStore = create<Store>()(
             )
             if (!hasIncident) return false
           }
+          if (filters.ownerId && b.ownerId !== filters.ownerId) return false
+          if (filters.cageSize) {
+            const cage = cages.find((c) => c.id === b.cageId)
+            if (!cage || cage.size !== filters.cageSize) return false
+          }
+          if (filters.status && b.status !== filters.status) return false
           return true
         })
       },

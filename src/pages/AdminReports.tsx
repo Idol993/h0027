@@ -5,7 +5,7 @@ import { format, parseISO, subMonths } from "date-fns"
 import { useStore } from "@/store"
 import StarRating from "@/components/StarRating"
 import StatusBadge from "@/components/StatusBadge"
-import type { IncidentType } from "@/types"
+import type { IncidentType, CageSize, BookingStatus, User } from "@/types"
 
 type TabKey = "bookings" | "reviews" | "incidents"
 
@@ -24,6 +24,22 @@ const ratingOptions = [
   { value: 3, label: "3星" },
   { value: 4, label: "4星" },
   { value: 5, label: "5星" },
+]
+
+const cageSizeOptions: { value: CageSize | ""; label: string }[] = [
+  { value: "", label: "全部笼位" },
+  { value: "small", label: "小型笼" },
+  { value: "medium", label: "中型笼" },
+  { value: "large", label: "大型笼" },
+]
+
+const statusOptions: { value: BookingStatus | ""; label: string }[] = [
+  { value: "", label: "全部状态" },
+  { value: "pending", label: "待确认" },
+  { value: "confirmed", label: "已确认" },
+  { value: "checked_in", label: "在住中" },
+  { value: "checked_out", label: "已离店" },
+  { value: "cancelled", label: "已取消" },
 ]
 
 const incidentTypeLabel: Record<IncidentType, string> = {
@@ -48,9 +64,17 @@ export default function AdminReports() {
   const [endDate, setEndDate] = useState(format(new Date(), "yyyy-MM-dd"))
   const [ratingFilter, setRatingFilter] = useState(0)
   const [incidentTypeFilter, setIncidentTypeFilter] = useState<IncidentType | "">("")
+  const [ownerIdFilter, setOwnerIdFilter] = useState("")
+  const [cageSizeFilter, setCageSizeFilter] = useState<CageSize | "">("")
+  const [statusFilter, setStatusFilter] = useState<BookingStatus | "">("")
   const [activeTab, setActiveTab] = useState<TabKey>("bookings")
   const [page, setPage] = useState(1)
   const [showExportModal, setShowExportModal] = useState(false)
+
+  const ownerOptions = useMemo(() => {
+    const owners = users.filter((u) => u.role === "owner")
+    return [{ id: "", name: "全部主人" }, ...owners]
+  }, [users])
 
   const getPet = (petId: string) => pets.find((p) => p.id === petId)
   const getOwner = (ownerId: string) => users.find((u) => u.id === ownerId)
@@ -62,17 +86,20 @@ export default function AdminReports() {
       endDate,
       rating: ratingFilter > 0 ? ratingFilter : undefined,
       incidentType: incidentTypeFilter || undefined,
+      ownerId: ownerIdFilter || undefined,
+      cageSize: cageSizeFilter || undefined,
+      status: statusFilter || undefined,
     })
-  }, [getFilteredRecords, startDate, endDate, ratingFilter, incidentTypeFilter, bookings, incidents])
+  }, [getFilteredRecords, startDate, endDate, ratingFilter, incidentTypeFilter, ownerIdFilter, cageSizeFilter, statusFilter])
 
   const filteredReviews = useMemo(() => {
+    const bookingIds = new Set(filteredBookings.map((b) => b.id))
     return reviews.filter((r) => {
-      if (startDate && r.createdAt < startDate) return false
-      if (endDate && r.createdAt > endDate) return false
+      if (!bookingIds.has(r.bookingId)) return false
       if (ratingFilter > 0 && r.rating !== ratingFilter) return false
       return true
     })
-  }, [reviews, startDate, endDate, ratingFilter])
+  }, [reviews, filteredBookings, ratingFilter])
 
   const filteredIncidents = useMemo(() => {
     return incidents.filter((i) => {
@@ -90,7 +117,34 @@ export default function AdminReports() {
     const avgRating = filteredReviews.length > 0
       ? Math.round((filteredReviews.reduce((s, r) => s + r.rating, 0) / filteredReviews.length) * 10) / 10
       : 0
-    return { totalIncome, avgRating, completedCount: completedBookings.length, reviewCount: filteredReviews.length }
+
+    const depositIncome = filteredBookings.reduce((sum, b) => {
+      const p = b.payments?.find((p) => p.type === "deposit")
+      return sum + (p?.amount ?? 0)
+    }, 0)
+    const balanceIncome = filteredBookings.reduce((sum, b) => {
+      const p = b.payments?.find((p) => p.type === "balance")
+      return sum + (p?.amount ?? 0)
+    }, 0)
+    const refunds = filteredBookings.reduce((sum, b) => {
+      return sum + (b.refunds?.reduce((s, r) => s + r.amount, 0) ?? 0)
+    }, 0)
+    const extrasIncome = completedBookings.reduce((sum, b) => {
+      return sum + (b.bill?.extras?.reduce((s, e) => s + e.amount, 0) ?? 0)
+    }, 0)
+    const netIncome = depositIncome + balanceIncome - refunds + extrasIncome
+
+    return {
+      totalIncome,
+      avgRating,
+      completedCount: completedBookings.length,
+      reviewCount: filteredReviews.length,
+      depositIncome,
+      balanceIncome,
+      refunds,
+      extrasIncome,
+      netIncome,
+    }
   }, [filteredBookings, filteredReviews])
 
   const paginatedBookings = useMemo(() => {
@@ -127,6 +181,9 @@ export default function AdminReports() {
     setEndDate(format(new Date(), "yyyy-MM-dd"))
     setRatingFilter(0)
     setIncidentTypeFilter("")
+    setOwnerIdFilter("")
+    setCageSizeFilter("")
+    setStatusFilter("")
     setPage(1)
   }
 
@@ -187,8 +244,13 @@ export default function AdminReports() {
       incidentStats,
       totalIncome: summaryStats.totalIncome,
       avgRating: summaryStats.avgRating,
+      depositIncome: summaryStats.depositIncome,
+      balanceIncome: summaryStats.balanceIncome,
+      refunds: summaryStats.refunds,
+      extrasIncome: summaryStats.extrasIncome,
+      netIncome: summaryStats.netIncome,
     }
-  }, [filteredBookings, filteredReviews, filteredIncidents, bookings, pets, users, cages, summaryStats.totalIncome, summaryStats.avgRating])
+  }, [filteredBookings, filteredReviews, filteredIncidents, bookings, pets, users, cages, summaryStats.totalIncome, summaryStats.avgRating, summaryStats.depositIncome, summaryStats.balanceIncome, summaryStats.refunds, summaryStats.extrasIncome, summaryStats.netIncome])
 
   function generateCSV(): string {
     const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`
@@ -197,15 +259,56 @@ export default function AdminReports() {
     lines.push(`筛选日期,${esc(startDate)} ~ ${esc(endDate)}`)
     lines.push(`生成时间,${esc(format(new Date(), "yyyy-MM-dd HH:mm:ss"))}`)
     lines.push("")
-    lines.push("=== 收入合计 ===")
+    lines.push("=== 财务汇总 ===")
     lines.push(`收入总额,${esc(exportMonthlySummary.totalIncome)}`)
+    lines.push(`订金收入,${esc(exportMonthlySummary.depositIncome)}`)
+    lines.push(`尾款收入,${esc(exportMonthlySummary.balanceIncome)}`)
+    lines.push(`退款支出,${esc(exportMonthlySummary.refunds)}`)
+    lines.push(`额外费用,${esc(exportMonthlySummary.extrasIncome)}`)
+    lines.push(`净收入,${esc(exportMonthlySummary.netIncome)}`)
     lines.push(`已完成订单数,${esc(exportMonthlySummary.orderDetails.length)}`)
     lines.push(`平均评分,${esc(exportMonthlySummary.avgRating)}`)
     lines.push("")
     lines.push("=== 订单明细 ===")
-    lines.push(["编号", "宠物", "主人", "笼位", "入住日期", "离店日期", "天数", "金额(元)"].map(esc).join(","))
-    exportMonthlySummary.orderDetails.forEach((d) => {
-      lines.push([d.id, d.petName, d.ownerName, d.cageName, d.startDate, d.endDate, d.days, d.total].map(esc).join(","))
+    lines.push(["编号", "宠物", "主人", "笼位", "入住日期", "离店日期", "天数", "订单总额", "订金", "尾款", "退款", "额外费用", "支付状态"].map(esc).join(","))
+    exportMonthlySummary.orderDetails.forEach((d, idx) => {
+      const booking = filteredBookings.filter((b) => b.status === "checked_out" && b.bill)[idx]
+      const depositPaid = booking?.payments?.some((p) => p.type === "deposit") ? "已付" : "未付"
+      const balancePaid = booking?.payments?.some((p) => p.type === "balance") ? "已付" : "未付"
+      const refundsTotal = booking?.refunds?.reduce((s, r) => s + r.amount, 0) ?? 0
+      const extrasTotal = booking?.bill?.extras?.reduce((s, e) => s + e.amount, 0) ?? 0
+      const payStatus = depositPaid === "已付" && balancePaid === "已付" ? "已结清" : "部分支付"
+      lines.push([
+        d.id, d.petName, d.ownerName, d.cageName, d.startDate, d.endDate, d.days,
+        d.total, booking?.depositAmount ?? 0, booking?.balanceAmount ?? 0, refundsTotal, extrasTotal, payStatus
+      ].map(esc).join(","))
+    })
+    lines.push("")
+    lines.push("=== 支付记录明细 ===")
+    lines.push(["订单编号", "支付类型", "金额", "支付时间"].map(esc).join(","))
+    filteredBookings.forEach((b) => {
+      b.payments?.forEach((p) => {
+        lines.push([
+          b.id.slice(-4).toUpperCase(),
+          p.type === "deposit" ? "订金" : "尾款",
+          p.amount,
+          format(parseISO(p.paidAt), "yyyy-MM-dd HH:mm")
+        ].map(esc).join(","))
+      })
+    })
+    lines.push("")
+    lines.push("=== 退款记录明细 ===")
+    lines.push(["订单编号", "退款金额", "原因", "距离入住天数", "退款时间"].map(esc).join(","))
+    filteredBookings.forEach((b) => {
+      b.refunds?.forEach((r) => {
+        lines.push([
+          b.id.slice(-4).toUpperCase(),
+          r.amount,
+          r.reason === "cancellation" ? "取消退款" : "退款",
+          r.daysBeforeCheckin,
+          format(parseISO(r.refundedAt), "yyyy-MM-dd HH:mm")
+        ].map(esc).join(","))
+      })
     })
     lines.push("")
     lines.push("=== 评价汇总 ===")
@@ -239,8 +342,13 @@ export default function AdminReports() {
     lines.push(`筛选日期：${startDate} ~ ${endDate}`)
     lines.push(`生成时间：${format(new Date(), "yyyy-MM-dd HH:mm:ss")}`)
     lines.push("")
-    lines.push("【收入合计】")
+    lines.push("【财务汇总】")
     lines.push(`  收入总额：¥${exportMonthlySummary.totalIncome.toLocaleString()}`)
+    lines.push(`  订金收入：¥${exportMonthlySummary.depositIncome.toLocaleString()}`)
+    lines.push(`  尾款收入：¥${exportMonthlySummary.balanceIncome.toLocaleString()}`)
+    lines.push(`  退款支出：-¥${exportMonthlySummary.refunds.toLocaleString()}`)
+    lines.push(`  额外费用：+¥${exportMonthlySummary.extrasIncome.toLocaleString()}`)
+    lines.push(`  净  收  入：¥${exportMonthlySummary.netIncome.toLocaleString()}`)
     lines.push(`  已完成订单：${exportMonthlySummary.orderDetails.length} 笔`)
     lines.push(`  平均评分：${exportMonthlySummary.avgRating} 星`)
     lines.push("")
@@ -248,9 +356,56 @@ export default function AdminReports() {
     if (exportMonthlySummary.orderDetails.length === 0) {
       lines.push("  （暂无数据）")
     } else {
-      lines.push(`  ${pad("编号", 6)}${pad("宠物", 8)}${pad("主人", 8)}${pad("笼位", 8)}${pad("入住", 12)}${pad("离店", 12)}${pad("天数", 6)}金额`)
-      exportMonthlySummary.orderDetails.forEach((d) => {
-        lines.push(`  ${pad(d.id, 6)}${pad(d.petName, 8)}${pad(d.ownerName, 8)}${pad(d.cageName, 8)}${pad(d.startDate, 12)}${pad(d.endDate, 12)}${pad(d.days + "天", 6)}¥${d.total}`)
+      lines.push(`  ${pad("编号", 6)}${pad("宠物", 8)}${pad("主人", 8)}${pad("笼位", 8)}${pad("入住", 12)}${pad("离店", 12)}${pad("天数", 6)}${pad("总额", 8)}${pad("订金", 7)}${pad("尾款", 7)}支付`)
+      exportMonthlySummary.orderDetails.forEach((d, idx) => {
+        const booking = filteredBookings.filter((b) => b.status === "checked_out" && b.bill)[idx]
+        const depositPaid = booking?.payments?.some((p) => p.type === "deposit") ? "已付" : "未付"
+        const balancePaid = booking?.payments?.some((p) => p.type === "balance") ? "已付" : "未付"
+        const payStatus = depositPaid === "已付" && balancePaid === "已付" ? "已结清" : "未结清"
+        lines.push(`  ${pad(d.id, 6)}${pad(d.petName, 8)}${pad(d.ownerName, 8)}${pad(d.cageName, 8)}${pad(d.startDate, 12)}${pad(d.endDate, 12)}${pad(d.days + "天", 6)}${pad("¥" + d.total, 8)}${pad("¥" + (booking?.depositAmount ?? 0), 7)}${pad("¥" + (booking?.balanceAmount ?? 0), 7)}${payStatus}`)
+      })
+    }
+    lines.push("")
+    lines.push("【支付记录】")
+    const allPayments: { bookingId: string; type: string; amount: number; paidAt: string }[] = []
+    filteredBookings.forEach((b) => {
+      b.payments?.forEach((p) => {
+        allPayments.push({
+          bookingId: b.id.slice(-4).toUpperCase(),
+          type: p.type === "deposit" ? "订金" : "尾款",
+          amount: p.amount,
+          paidAt: format(parseISO(p.paidAt), "MM-dd HH:mm"),
+        })
+      })
+    })
+    if (allPayments.length === 0) {
+      lines.push("  （暂无数据）")
+    } else {
+      lines.push(`  ${pad("订单", 6)}${pad("类型", 6)}${pad("金额", 10)}时间`)
+      allPayments.forEach((p) => {
+        lines.push(`  ${pad(p.bookingId, 6)}${pad(p.type, 6)}${pad("¥" + p.amount, 10)}${p.paidAt}`)
+      })
+    }
+    lines.push("")
+    lines.push("【退款记录】")
+    const allRefunds: { bookingId: string; amount: number; reason: string; daysBefore: number; refundedAt: string }[] = []
+    filteredBookings.forEach((b) => {
+      b.refunds?.forEach((r) => {
+        allRefunds.push({
+          bookingId: b.id.slice(-4).toUpperCase(),
+          amount: r.amount,
+          reason: r.reason === "cancellation" ? "取消退款" : "退款",
+          daysBefore: r.daysBeforeCheckin,
+          refundedAt: format(parseISO(r.refundedAt), "MM-dd HH:mm"),
+        })
+      })
+    })
+    if (allRefunds.length === 0) {
+      lines.push("  （暂无数据）")
+    } else {
+      lines.push(`  ${pad("订单", 6)}${pad("金额", 10)}${pad("原因", 10)}${pad("距入住", 8)}时间`)
+      allRefunds.forEach((r) => {
+        lines.push(`  ${pad(r.bookingId, 6)}${pad("-¥" + r.amount, 10)}${pad(r.reason, 10)}${pad(r.daysBefore + "天", 8)}${r.refundedAt}`)
       })
     }
     lines.push("")
@@ -358,6 +513,45 @@ export default function AdminReports() {
             </select>
           </div>
 
+          <div>
+            <label className="block text-sm font-semibold text-gray-600 mb-1.5">宠物主人</label>
+            <select
+              value={ownerIdFilter}
+              onChange={(e) => setOwnerIdFilter(e.target.value)}
+              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-coral-400/50 focus:border-coral-400"
+            >
+              {ownerOptions.map((opt) => (
+                <option key={opt.id} value={opt.id}>{opt.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-gray-600 mb-1.5">笼位类型</label>
+            <select
+              value={cageSizeFilter}
+              onChange={(e) => setCageSizeFilter(e.target.value as CageSize | "")}
+              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-coral-400/50 focus:border-coral-400"
+            >
+              {cageSizeOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-gray-600 mb-1.5">订单状态</label>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as BookingStatus | "")}
+              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-coral-400/50 focus:border-coral-400"
+            >
+              {statusOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+
           <div className="flex gap-2">
             <button
               onClick={handleSearch}
@@ -386,7 +580,7 @@ export default function AdminReports() {
       </div>
 
       <div className="flex-1 p-6">
-        <div className="grid grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-4 gap-4 mb-4">
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-white rounded-2xl shadow-card p-5 flex items-center gap-4">
             <div className="w-12 h-12 rounded-2xl bg-coral-400/10 flex items-center justify-center">
               <DollarSign className="w-6 h-6 text-coral-400" />
@@ -411,8 +605,36 @@ export default function AdminReports() {
             </div>
             <div>
               <p className="text-xs text-gray-500">已完成订单</p>
-              <p className="text-2xl font-extrabold text-mint-500">{summaryStats.completedCount}</p>
+              <p className="text-2xl font-extrabold text-gray-800">{summaryStats.completedCount}</p>
             </div>
+          </motion.div>
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="bg-white rounded-2xl shadow-card p-5 flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-gray-100 flex items-center justify-center">
+              <DollarSign className="w-6 h-6 text-gray-500" />
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">净收入</p>
+              <p className="text-2xl font-extrabold text-gray-800">¥{summaryStats.netIncome.toLocaleString()}</p>
+            </div>
+          </motion.div>
+        </div>
+
+        <div className="grid grid-cols-4 gap-4 mb-6">
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="bg-mint-50 border-2 border-mint-200 rounded-2xl p-4">
+            <p className="text-xs font-semibold text-mint-700 mb-1">订金收入</p>
+            <p className="text-xl font-extrabold text-mint-600">¥{summaryStats.depositIncome.toLocaleString()}</p>
+          </motion.div>
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }} className="bg-blue-50 border-2 border-blue-200 rounded-2xl p-4">
+            <p className="text-xs font-semibold text-blue-700 mb-1">尾款收入</p>
+            <p className="text-xl font-extrabold text-blue-600">¥{summaryStats.balanceIncome.toLocaleString()}</p>
+          </motion.div>
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }} className="bg-coral-50 border-2 border-coral-200 rounded-2xl p-4">
+            <p className="text-xs font-semibold text-coral-700 mb-1">退款支出</p>
+            <p className="text-xl font-extrabold text-coral-500">-¥{summaryStats.refunds.toLocaleString()}</p>
+          </motion.div>
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.55 }} className="bg-purple-50 border-2 border-purple-200 rounded-2xl p-4">
+            <p className="text-xs font-semibold text-purple-700 mb-1">额外费用</p>
+            <p className="text-xl font-extrabold text-purple-600">+¥{summaryStats.extrasIncome.toLocaleString()}</p>
           </motion.div>
         </div>
 
@@ -641,11 +863,33 @@ export default function AdminReports() {
                   <DollarSign className="w-4 h-4 text-coral-400" />
                   收入合计
                 </h3>
-                <div className="bg-coral-50 rounded-2xl p-4">
+                <div className="bg-coral-50 rounded-2xl p-4 mb-3">
                   <p className="text-3xl font-extrabold text-coral-400">¥{exportMonthlySummary.totalIncome.toLocaleString()}</p>
                   <p className="text-xs text-gray-500 mt-1">
                     {startDate} ~ {endDate} 期间 {exportMonthlySummary.orderDetails.length} 笔已完成订单
                   </p>
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="bg-mint-50 rounded-xl p-3 flex justify-between items-center">
+                    <span className="text-mint-700 font-medium">订金收入</span>
+                    <span className="font-bold text-mint-600">¥{exportMonthlySummary.depositIncome.toLocaleString()}</span>
+                  </div>
+                  <div className="bg-blue-50 rounded-xl p-3 flex justify-between items-center">
+                    <span className="text-blue-700 font-medium">尾款收入</span>
+                    <span className="font-bold text-blue-600">¥{exportMonthlySummary.balanceIncome.toLocaleString()}</span>
+                  </div>
+                  <div className="bg-coral-50 rounded-xl p-3 flex justify-between items-center">
+                    <span className="text-coral-700 font-medium">退款支出</span>
+                    <span className="font-bold text-coral-500">-¥{exportMonthlySummary.refunds.toLocaleString()}</span>
+                  </div>
+                  <div className="bg-purple-50 rounded-xl p-3 flex justify-between items-center">
+                    <span className="text-purple-700 font-medium">额外费用</span>
+                    <span className="font-bold text-purple-600">+¥{exportMonthlySummary.extrasIncome.toLocaleString()}</span>
+                  </div>
+                </div>
+                <div className="mt-3 bg-gray-50 rounded-xl p-3 flex justify-between items-center">
+                  <span className="text-gray-700 font-semibold">净收入</span>
+                  <span className="text-xl font-extrabold text-gray-800">¥{exportMonthlySummary.netIncome.toLocaleString()}</span>
                 </div>
               </div>
 

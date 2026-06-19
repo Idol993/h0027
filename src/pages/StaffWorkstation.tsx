@@ -27,7 +27,8 @@ export default function StaffWorkstation() {
         if (b.checkinRecord) {
           const ci = parseISO(b.checkinRecord.checkedInAt)
           const vd = parseISO(viewDate)
-          return ci <= vd
+          const ed = parseISO(b.endDate)
+          return ci <= vd && ed >= vd
         }
         return true
       }

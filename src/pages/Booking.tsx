@@ -78,6 +78,9 @@ export default function Booking() {
     return days * selectedCage.dailyRate
   }, [selectedCage, days])
 
+  const depositAmount = useMemo(() => Math.round(totalPrice * 0.3), [totalPrice])
+  const balanceAmount = useMemo(() => totalPrice - depositAmount, [totalPrice, depositAmount])
+
   function handleSelectAlt(alt: { startDate: string; endDate: string }) {
     setStartDate(alt.startDate)
     setEndDate(alt.endDate)
@@ -392,21 +395,50 @@ export default function Booking() {
                     {selectedCage?.size === "small" ? "小型" : selectedCage?.size === "medium" ? "中型" : "大型"}
                   </p>
                 </div>
-                <div className="bg-coral-50 rounded-2xl p-4 flex items-center justify-between">
-                  <div>
-                    <p className="text-xs text-gray-500">费用合计</p>
-                    <p className="text-xs text-gray-400">
-                      {days}天 × ¥{selectedCage?.dailyRate ?? 0}/天
-                    </p>
+                <div className="bg-cream-100 rounded-2xl p-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold text-gray-800">住宿费</span>
+                    <span className="text-sm text-gray-600">{days}天 × ¥{selectedCage?.dailyRate ?? 0}/天</span>
                   </div>
-                  <p className="text-2xl font-extrabold text-coral-400">¥{totalPrice}</p>
+                  <div className="flex items-center justify-between mt-2">
+                    <span className="text-sm font-semibold text-gray-800">合计</span>
+                    <span className="text-lg font-extrabold text-gray-800">¥{totalPrice}</span>
+                  </div>
+                </div>
+                <div className="bg-mint-50 border-2 border-mint-200 rounded-2xl p-4">
+                  <p className="text-sm font-bold text-mint-600 mb-2">支付计划</p>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-700">订金（30%，已付）</span>
+                    <span className="text-sm font-bold text-mint-600">¥{depositAmount}</span>
+                  </div>
+                  <div className="flex items-center justify-between mt-1.5">
+                    <span className="text-sm text-gray-700">尾款（入住时支付）</span>
+                    <span className="text-sm font-bold text-gray-700">¥{balanceAmount}</span>
+                  </div>
+                </div>
+                <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl p-4">
+                  <p className="text-sm font-bold text-amber-700 mb-2">取消退款规则</p>
+                  <ul className="text-xs text-gray-600 space-y-1.5">
+                    <li className="flex items-start gap-2">
+                      <span className="text-amber-500">•</span>
+                      <span>入住前 ≥7 天取消：订金 <span className="font-bold text-amber-700">100%</span> 退还</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-amber-500">•</span>
+                      <span>入住前 ≥3 天且 {'<'}7 天取消：订金 <span className="font-bold text-amber-700">50%</span> 退还</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-amber-500">•</span>
+                      <span>入住前 {'<'}3 天取消或已入住：<span className="font-bold text-amber-700">不予退款</span></span>
+                    </li>
+                  </ul>
                 </div>
               </div>
               <button
                 onClick={handleConfirm}
                 className="w-full py-3.5 bg-coral-400 text-white font-bold rounded-2xl hover:bg-coral-500 transition-colors shadow-glow"
               >
-                确认预约
+                确认预约（付订金 ¥{depositAmount}）
               </button>
             </div>
           )}
